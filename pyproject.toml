@@ -1,0 +1,17 @@
+[project]
+name = "quartet"
+version = "0.1.0"
+description = "Four quant models on real market data"
+requires-python = ">=3.11"
+dependencies = ["numpy", "scipy", "pandas", "yfinance"]
+license = "MIT"
+
+[tool.ruff]
+line-length = 180
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

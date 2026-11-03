@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quartet</title>
+<meta name="description" content="Four quant models built from scratch on real market data: Fama-French, regime switching, Longstaff-Schwartz and Heston.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="wrap">
+  <p class="eyebrow">Four quant models · real data · built from scratch</p>
+  <h1>Quartet</h1>
+  <p class="lede">Four classic models from quantitative finance, each written from scratch and run on real market data. Every chapter ends with what broke.</p>
+  <nav class="toc" aria-label="Chapters">
+    <a href="#ff"><b>1</b> Fama-French</a>
+    <a href="#rg"><b>2</b> Regime switching</a>
+    <a href="#ls"><b>3</b> Longstaff-Schwartz</a>
+    <a href="#hs"><b>4</b> Heston</a>
+  </nav>
+  <p class="note">Research and learning only. Nothing here is investment advice.</p>
+</header>
+
+<main class="wrap">
+
+<section id="ff" class="chapter">
+  <p class="num">Chapter 1 · easiest</p>
+  <h2>How much alpha survives Fama-French?</h2>
+  <p class="intro">Alpha is the return a fund earns that its risk can't explain. CAPM explains returns with the market alone. Fama-French adds two more factors: <b>SMB</b> (small companies beat big ones) and <b>HML</b> (cheap "value" companies beat expensive ones). If a fund's edge was just owning those, its alpha shrinks.</p>
+  <div class="card">
+    <div class="card-head"><h3>Yearly alpha, before and after the extra factors</h3><button class="link" data-table="ffTable">Show as table</button></div>
+    <div id="ffChart" class="chart"></div>
+    <div id="ffTable" class="table-wrap" hidden></div>
+  </div>
+  <div class="takeaways" id="ffTake"></div>
+</section>
+
+<section id="rg" class="chapter">
+  <p class="num">Chapter 2</p>
+  <h2>Calm or stressed? A hidden Markov model on the S&amp;P 500</h2>
+  <p class="intro">Each day the market is secretly in a <b>calm</b> or a <b>stressed</b> state, each with its own volatility. The model, fitted by expectation maximisation, guesses the state from returns. The shading shows its probability of stress.</p>
+  <div class="card">
+    <div class="card-head">
+      <h3>SPY price, shaded by P(stressed)</h3>
+      <div class="seg" role="radiogroup" aria-label="Probability type">
+        <button role="radio" aria-checked="true" data-mode="honest">Honest (filtered)</button>
+        <button role="radio" aria-checked="false" data-mode="cheat">Cheating (smoothed)</button>
+      </div>
+    </div>
+    <p class="hint" id="rgHint"></p>
+    <div id="rgPrice" class="chart"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Growth of $1: hold SPY when calm, cash when stressed</h3><button class="link" data-table="rgTable">Show as table</button></div>
+    <div id="rgEquity" class="chart"></div>
+    <div id="rgTable" class="table-wrap" hidden></div>
+  </div>
+  <div class="takeaways" id="rgTake"></div>
+</section>
+
+<section id="ls" class="chapter">
+  <p class="num">Chapter 3</p>
+  <h2>When should you exercise an American put?</h2>
+  <p class="intro">An American put can be exercised any day until expiry. Longstaff-Schwartz simulates 100,000 price paths, then works backwards, using regression to estimate the value of waiting. Exercise when the payoff now beats it. A binomial tree checks every answer.</p>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-head"><h3>Exercise boundary</h3></div>
+      <p class="hint">Strike $40, stock $36, 20% volatility, 6% rates, 1 year. Below the line, exercise now.</p>
+      <div id="lsBoundary" class="chart"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>More paths, less noise</h3></div>
+      <p class="hint">Price from 8 random seeds at each path count. The dashed line is the binomial tree.</p>
+      <div id="lsPaths" class="chart"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>All 20 cases from the original paper</h3></div>
+    <div id="lsTable" class="table-wrap"></div>
+  </div>
+  <div class="takeaways" id="lsTake"></div>
+</section>
+
+<section id="hs" class="chapter">
+  <p class="num">Chapter 4 · hardest</p>
+  <h2>Heston: when volatility itself is random</h2>
+  <p class="intro">Black-Scholes assumes one volatility for every option. Real prices disagree: out-of-the-money puts cost more, making a "smile". Heston lets volatility wander, with five parameters fitted to today's SPY options.</p>
+  <div class="card">
+    <div class="card-head"><h3 id="hsSmileTitle">Implied volatility: market vs Heston</h3></div>
+    <ul class="legend"><li><svg viewBox="0 0 14 14"><circle cx="7" cy="7" r="4" class="dot-mkt"/></svg>Market quotes</li><li><svg viewBox="0 0 14 14"><line x1="1" y1="7" x2="13" y2="7" class="line-model"/></svg>Heston fit</li></ul>
+    <div id="hsSmiles" class="smiles"></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-head"><h3>Fitted parameters</h3></div>
+      <div id="hsParams" class="table-wrap"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Lock kappa, refit the rest</h3></div>
+      <p class="hint">A flat line means the data can't tell those kappa values apart.</p>
+      <div id="hsProfile" class="chart"></div>
+    </div>
+  </div>
+  <div class="takeaways" id="hsTake"></div>
+</section>
+
+</main>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<footer class="wrap">
+  <p>Quartet · <a href="https://github.com/tttamannaanand/quartet">source code and tests</a> · data from Yahoo Finance and the Kenneth French Data Library.</p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
