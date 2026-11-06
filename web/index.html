@@ -32,6 +32,12 @@
     <div id="ffChart" class="chart"></div>
     <div id="ffTable" class="table-wrap" hidden></div>
   </div>
+  <div class="card">
+    <div class="card-head"><h3>Add more factors: does the alpha shrink?</h3><button class="link" data-table="ffLadderTable">Show as table</button></div>
+    <p class="hint">Alpha a year as the model grows: CAPM, then Fama-French 3 (size, value), 5 (plus profitability RMW and investment CMA), then momentum. Filled dots are statistically significant (|t| &gt; 2). All four models use the five-factor file, so its FF3 numbers can differ slightly from the chart above.</p>
+    <div id="ffLadder" class="chart"></div>
+    <div id="ffLadderTable" class="table-wrap" hidden></div>
+  </div>
   <div class="takeaways" id="ffTake"></div>
 </section>
 
@@ -55,6 +61,12 @@
     <div id="rgEquity" class="chart"></div>
     <div id="rgTable" class="table-wrap" hidden></div>
   </div>
+  <div class="card">
+    <div class="card-head"><h3>How many states? BIC says more</h3><button class="link" data-table="rgBicTable">Show as table</button></div>
+    <p class="hint">Bayesian information criterion: fit quality minus a penalty for every extra parameter. Lower is better; bars show how far each is behind the best.</p>
+    <div id="rgBic" class="chart"></div>
+    <div id="rgBicTable" class="table-wrap" hidden></div>
+  </div>
   <div class="takeaways" id="rgTake"></div>
 </section>
 
@@ -75,6 +87,16 @@
     </div>
   </div>
   <div class="card">
+    <div class="card-head"><h3>80 simulated paths, and where each one exercises</h3></div>
+    <p class="hint">Each grey line is a stock path. It ends at a dot where the algorithm decides to exercise. The blue line is the exercise boundary from the binomial tree; the dashed line is the $40 strike.</p>
+    <div id="lsFan" class="chart"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>The put's value at every price and time</h3><span class="hint3d">Drag to rotate · scroll to zoom</span></div>
+    <p class="hint">Value of the American put (from the binomial tree) for stock prices $24–$56 over its one-year life. The blue ridge is the exercise boundary: below it, the surface is the flat payoff line $40 − S.</p>
+    <div id="lsSurface" class="plot3d" role="img" aria-label="3D surface of American put value"></div>
+  </div>
+  <div class="card">
     <div class="card-head"><h3>All 20 cases from the original paper</h3></div>
     <div id="lsTable" class="table-wrap"></div>
   </div>
@@ -89,6 +111,11 @@
     <div class="card-head"><h3 id="hsSmileTitle">Implied volatility: market vs Heston</h3></div>
     <ul class="legend"><li><svg viewBox="0 0 14 14"><circle cx="7" cy="7" r="4" class="dot-mkt"/></svg>Market quotes</li><li><svg viewBox="0 0 14 14"><line x1="1" y1="7" x2="13" y2="7" class="line-model"/></svg>Heston fit</li></ul>
     <div id="hsSmiles" class="smiles"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>The volatility surface</h3><span class="hint3d">Drag to rotate · scroll to zoom</span></div>
+    <p class="hint">Every SPY quote as a dot (implied volatility by strike and days to expiry), with the fitted Heston surface through them.</p>
+    <div id="hsSurface" class="plot3d" role="img" aria-label="3D implied volatility surface"></div>
   </div>
   <div class="grid2">
     <div class="card">
@@ -110,6 +137,7 @@
 <footer class="wrap">
   <p>Quartet · <a href="https://github.com/tttamannaanand/quartet">source code and tests</a> · data from Yahoo Finance and the Kenneth French Data Library.</p>
 </footer>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

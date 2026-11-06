@@ -221,6 +221,14 @@ function famaFrench(d) {
   if (by["BRK-B"]) items.push(`<b>Berkshire</b> leans strongly on value (HML ${fix(by["BRK-B"].ff3.hml)}). Some of Buffett's alpha is the value factor, though ${signed(by["BRK-B"].ff3.alpha)} a year is left, with a t of ${fix(by["BRK-B"].ff3.t)}.`);
   if (by.ARKK) items.push(`Factors can also <i>raise</i> alpha. <b>ARKK</b> goes from ${signed(by.ARKK.capm.alpha)} to ${signed(by.ARKK.ff3.alpha)} once its strong tilts toward small companies (SMB ${fix(by.ARKK.ff3.smb)}) and away from value (HML ${fix(by.ARKK.ff3.hml)}) are counted. Even so, a t of ${fix(by.ARKK.ff3.t)} is nowhere near significant.`);
   if (by.SPY) items.push(`Sanity check: <b>SPY</b> has a market beta of ${fix(by.SPY.ff3.mkt)} and alpha of ${signed(by.SPY.ff3.alpha)}, about its fee. Most of the work was cleaning and lining up the data, as the brief warned.`);
+  const last = (f) => f.ladder[f.ladder.length - 1];
+  const grew = funds.filter((f) => f.ladder.length && last(f).alpha > f.ladder[1].alpha + 0.01);
+  const sigEnd = funds.filter((f) => f.ladder.length && Math.abs(last(f).t) > 2);
+  if (grew.length) {
+    const g = grew.reduce((a, b2) => (last(b2).alpha > last(a).alpha ? b2 : a));
+    items.push(`<b>Adding factors doesn't always shrink alpha.</b> With profitability, investment and momentum added, ${g.ticker}'s alpha <i>grows</i> from ${signed(g.ladder[1].alpha)} to ${signed(last(g).alpha)} a year (t = ${fix(last(g).t)}). Its stocks load negatively on the new factors, so the model expected them to do worse than they did.`);
+  }
+  if (sigEnd.length) items.push(`In the full six-factor model, ${sigEnd.map((f) => `<b>${f.ticker}</b> (${signed(last(f).alpha)}, t ${fix(last(f).t)})`).join(" and ")} cross the |t| &gt; 2 line. Run six models on six funds and one or two "significant" results can appear by chance, so treat them as leads, not proof.`);
   takeaways($("#ffTake"), items);
 }
 
@@ -282,6 +290,7 @@ function regimes(d) {
     `The model finds two clear moods: calm days with ${pct(f.calm_vol, 0)} yearly volatility lasting about ${Math.round(f.calm_days)} trading days, and stressed spells with ${pct(f.stress_vol, 0)} lasting about ${Math.round(f.stress_days)}.`,
     `<b>The trap is real.</b> Using smoothed probabilities, the strategy makes ${pct(ch.cagr)} a year with a worst drop of ${pct(ch.max_drawdown)}. The honest version makes ${pct(hon.cagr)}. The difference is entirely information from the future.`,
     `Honestly done, the signal mostly cuts risk: volatility falls from ${pct(bh.vol)} to ${pct(hon.vol)} and the worst drop from ${pct(bh.max_drawdown)} to ${pct(hon.max_drawdown)}, but it gives up return: ${pct(hon.cagr)} a year against ${pct(bh.cagr)} for simply holding.`,
+    `<b>BIC wants more states</b> than the two we used: ${d.bic.map((o) => `${o.states}: +${Math.round(o.delta).toLocaleString()}`).join(", ")} behind the best. Daily returns have fat tails, so each extra volatility level keeps paying for its parameters. Two states is a choice for interpretability, not what the data demands.`,
     `The honest filter switches ${hon.switches} times, against ${ch.switches} for the cheating one: without hindsight it gets whipsawed. Each switch is charged 0.05%.`,
   ]);
 }
@@ -339,6 +348,7 @@ function lsmChapter(d) {
   takeaways($("#lsTake"), [
     `Across all 20 cases, Longstaff-Schwartz lands within <b>$${fix(d.worst_error, 3)}</b> of the binomial tree.`,
     `It comes in slightly <i>below</i> the tree in ${below} of 20 cases. That is expected: the regression's exercise rule is never perfect, and any imperfect rule earns a bit less than the best one, so the method is biased low.`,
+    `In the path picture, most in-the-money paths stop early, the moment they cross the boundary, rather than waiting for expiry. The boundary rises toward the $40 strike as time runs out, so exercising gets more tempting near the end.`,
     `Being allowed to exercise early is worth a lot when the put is deep in the money: up to $${fix(Math.max(...d.rows.map((r) => r.premium)))} over the European price.`,
     `The choice of regression barely matters past degree 2: prices run from $${fix(deg[0].price, 3)} (degree 1) to $${fix(deg[deg.length - 1].price, 3)} (degree ${deg[deg.length - 1].degree}). Path count matters more; with 1,000 paths the price swings by about ±$${fix(2 * d.paths[0].spread, 2)}.`,
   ]);
@@ -430,16 +440,215 @@ function hestonChapter(d) {
   takeaways($("#hsTake"), items);
 }
 
+
+/* ---------- additions: factor ladder, BIC, path fan, 3D surfaces ---------- */
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const CAT = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6"];
+
+function ladderChart(d) {
+  const host = $("#ffLadder");
+  host.innerHTML = "";
+  const funds = d.funds.filter((f) => f.ladder.length);
+  const models = funds[0].ladder.map((x) => x.model);
+  const W = width(host);
+  const H = 320;
+  const m = { t: 14, r: W < 520 ? 56 : 80, b: 30, l: 48 };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Alpha as factors are added" }, host);
+  const vals = funds.flatMap((f) => f.ladder.map((x) => x.alpha));
+  const lo = Math.min(0, ...vals) - 0.01;
+  const hi = Math.max(...vals) + 0.01;
+  const X = (i) => m.l + (i / (models.length - 1)) * (W - m.l - m.r);
+  const Y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+  const ax = el("g", { class: "axis" }, svg);
+  for (const v of niceTicks(lo, hi, 5)) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: "gridline" }, ax);
+    el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = `${Math.round(v * 100)}%`;
+  }
+  el("line", { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), class: "baseline" }, svg);
+  models.forEach((name, i) => {
+    el("text", { x: X(i), y: H - 8, "text-anchor": i === 0 ? "start" : i === models.length - 1 ? "end" : "middle" }, ax).textContent = W < 520 ? name.replace("FF5 + momentum", "+Mom") : name;
+  });
+  // Spread end labels so they don't collide.
+  const ends = funds.map((f, k) => ({ k, y: Y(f.ladder[f.ladder.length - 1].alpha) })).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 13);
+  const labelY = Object.fromEntries(ends.map((e) => [e.k, e.y]));
+  funds.forEach((f, k) => {
+    const color = `var(${CAT[k % CAT.length]})`;
+    el("path", { d: f.ladder.map((x, i) => `${i ? "L" : "M"}${X(i)},${Y(x.alpha)}`).join(""), class: "series", stroke: color }, svg);
+    f.ladder.forEach((x, i) => {
+      const sig = Math.abs(x.t) > 2;
+      const c = el("circle", { cx: X(i), cy: Y(x.alpha), r: 5, fill: sig ? color : "var(--surface)", stroke: color, class: "dot-sig" }, svg);
+      const hit = el("circle", { cx: X(i), cy: Y(x.alpha), r: 12, class: "hit" }, svg);
+      hit.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(f.ticker)}</b> · ${esc(x.model)}<br>Alpha ${signed(x.alpha)} a year<br>t = ${fix(x.t)} ${sig ? "(significant)" : "(could be luck)"}<br>R² ${fix(x.r2)}`));
+      hit.addEventListener("mouseleave", hideTip);
+      void c;
+    });
+    el("text", { x: X(models.length - 1) + 8, y: labelY[k] + 4, class: "label" }, svg).textContent = f.ticker;
+  });
+  table(
+    $("#ffLadderTable"),
+    ["Fund", ...models.map((x) => `${x} α (t)`), "Momentum loading"],
+    funds.map((f) => [`<b>${f.ticker}</b>`, ...f.ladder.map((x) => `${signed(x.alpha)} (${fix(x.t)})`), fix(f.ladder[f.ladder.length - 1].loadings.Mom)]),
+    [1, 2, 3, 4, 5],
+  );
+}
+
+function bicChart(d) {
+  const host = $("#rgBic");
+  host.innerHTML = "";
+  const rows = d.bic;
+  const W = width(host);
+  const row = 40;
+  const m = { t: 6, r: 120, b: 24, l: 70 };
+  const H = m.t + m.b + rows.length * row;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "BIC by number of states" }, host);
+  const max = Math.max(...rows.map((r) => r.delta));
+  const X = (v) => m.l + (v / max) * (W - m.l - m.r);
+  rows.forEach((r, i) => {
+    const y = m.t + i * row;
+    el("text", { x: m.l - 10, y: y + 22, "text-anchor": "end", class: "label", "font-weight": 600 }, svg).textContent = `${r.states} state${r.states > 1 ? "s" : ""}`;
+    el("rect", { x: m.l, y: y + 8, width: Math.max(3, X(r.delta) - m.l), height: 20, rx: 4, fill: r.delta === 0 ? "var(--s1)" : "var(--s3)" }, svg);
+    el("text", { x: Math.max(m.l + 3, X(r.delta)) + 6, y: y + 22, class: "label" }, svg).textContent = r.delta === 0 ? "best" : `+${Math.round(r.delta).toLocaleString()}`;
+    const hit = el("rect", { x: 0, y, width: W, height: row, class: "hit" }, svg);
+    hit.addEventListener("mousemove", (e) => showTip(e, `<b>${r.states} state${r.states > 1 ? "s" : ""}</b><br>BIC ${Math.round(r.bic).toLocaleString()} (+${Math.round(r.delta).toLocaleString()} vs best)<br>${r.params} parameters<br>Volatilities: ${r.vols.map((v) => pct(v, 0)).join(", ")}`));
+    hit.addEventListener("mouseleave", hideTip);
+  });
+  el("line", { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, class: "baseline" }, svg);
+  table($("#rgBicTable"), ["States", "Log-likelihood", "Parameters", "BIC", "Behind best", "Volatility of each state"],
+    rows.map((r) => [r.states, Math.round(r.loglik).toLocaleString(), r.params, Math.round(r.bic).toLocaleString(), Math.round(r.delta).toLocaleString(), r.vols.map((v) => pct(v, 0)).join(", ")]), [1, 2, 3, 4]);
+}
+
+function fanChart(d) {
+  const host = $("#lsFan");
+  host.innerHTML = "";
+  const f = d.fan;
+  const sf = d.surface;
+  const W = width(host);
+  const H = 320;
+  const m = { t: 12, r: W < 520 ? 16 : 120, b: 28, l: 48 };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Simulated paths and exercise points" }, host);
+  const all = f.paths.flat();
+  const lo = Math.min(...all) - 1;
+  const hi = Math.max(...all) + 1;
+  const X = (t) => m.l + t * (W - m.l - m.r);
+  const Y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+  const ax = el("g", { class: "axis" }, svg);
+  for (const v of niceTicks(lo, hi, 5)) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: "gridline" }, ax);
+    el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = `$${v}`;
+  }
+  [0, 0.25, 0.5, 0.75, 1].forEach((t) => (el("text", { x: X(t), y: H - 8, "text-anchor": "middle" }, ax).textContent = `${Math.round(t * 12)}m`));
+  el("line", { x1: m.l, x2: W - m.r, y1: Y(40), y2: Y(40), class: "baseline", "stroke-dasharray": "5 4" }, svg);
+  let exercised = 0;
+  f.paths.forEach((p, k) => {
+    const stop = f.stop[k];
+    const end = stop >= 0 ? stop : p.length - 1;
+    const d2 = p.slice(0, end + 1).map((v, i) => `${i ? "L" : "M"}${X(f.t[i]).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    el("path", { d: d2, fill: "none", stroke: "var(--ink-3)", "stroke-opacity": 0.45, "stroke-width": 1 }, svg);
+    if (stop >= 0) {
+      if (stop < p.length - 1) exercised++;
+      const dot = el("circle", { cx: X(f.t[stop]), cy: Y(p[stop]), r: 3.5, fill: stop < p.length - 1 ? "var(--s2)" : "var(--surface)", stroke: "var(--s2)", "stroke-width": 1.5 }, svg);
+      void dot;
+    }
+  });
+  const bd = sf.t.map((t, i) => `${i ? "L" : "M"}${X(t).toFixed(1)},${Y(sf.boundary[i]).toFixed(1)}`).join("");
+  el("path", { d: bd, class: "series", stroke: "var(--s1)", "stroke-width": 2.5 }, svg);
+  if (m.r > 20) {
+    el("text", { x: X(1) + 6, y: Y(40) + 4, class: "label" }, svg).textContent = "Strike $40";
+    el("text", { x: X(sf.t[sf.t.length - 3]) + 6, y: Y(sf.boundary[sf.boundary.length - 3]) + 18, class: "label" }, svg).textContent = "Exercise boundary";
+  }
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, class: "hit" }, svg);
+  hit.addEventListener("mousemove", (e) => {
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const t = Math.min(1, Math.max(0, (p.x - m.l) / (W - m.l - m.r)));
+    const i = Math.round(t * (sf.t.length - 1));
+    showTip(e, `<b>${(sf.t[i] * 12).toFixed(1)} months in</b><br>Exercise if the stock is below <b>$${fix(sf.boundary[i])}</b><br>${exercised} of ${f.paths.length} paths shown exercise early (orange dots)`);
+  });
+  hit.addEventListener("mouseleave", hideTip);
+}
+
+function mix(a, b, t) {
+  const hex = (c) => c.replace("#", "").match(/../g).map((x) => parseInt(x, 16));
+  try {
+    const [x, y] = [hex(a), hex(b)];
+    return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * t)).join(",")})`;
+  } catch {
+    return b;
+  }
+}
+
+function plotTheme() {
+  const ink = css("--ink-2");
+  const grid = css("--line");
+  const axis = (title) => ({ title: { text: title, font: { size: 12, color: ink } }, gridcolor: grid, zerolinecolor: grid, color: ink, backgroundcolor: "rgba(0,0,0,0)", showspikes: false });
+  return { axis, font: { family: "system-ui, -apple-system, Segoe UI, sans-serif", color: ink, size: 11 } };
+}
+
+function surfaces(ls, hs) {
+  if (!window.Plotly) {
+    for (const id of ["lsSurface", "hsSurface"]) $("#" + id).innerHTML = '<p class="hint">The 3D view needs Plotly, which did not load.</p>';
+    return;
+  }
+  const { axis, font } = plotTheme();
+  const narrow = innerWidth < 600;
+  const cfg = { responsive: true, displaylogo: false, displayModeBar: !narrow, modeBarButtonsToRemove: ["toImage", "resetCameraLastSave3d"] };
+  const k = narrow ? 1.6 : 1;
+  const eye = (x, y, z) => ({ x: x * k, y: y * k, z: z * k });
+  const blue = css("--s1");
+  const orange = css("--s2");
+  const surfaceScale = [[0, mix(css("--surface"), blue, 0.2)], [1, blue]];
+
+  const s = ls.surface;
+  const ridgeV = s.t.map((t, i) => Math.max(0, 40 - s.boundary[i]));
+  Plotly.react(
+    "lsSurface",
+    [
+      { type: "surface", x: s.s, y: s.t.map((t) => t * 12), z: s.v, colorscale: [[0, css("--c6") ? mix(css("--surface"), orange, 0.15) : css("--bg")], [1, orange]], opacity: 0.95, showscale: false,
+        contours: { z: { show: true, usecolormap: false, color: css("--line"), width: 1, start: 0, end: 16, size: 2 } },
+        hovertemplate: "Stock $%{x:.0f}<br>%{y:.1f} months in<br>Put worth $%{z:.2f}<extra></extra>" },
+      { type: "scatter3d", mode: "lines", x: s.boundary, y: s.t.map((t) => t * 12), z: ridgeV, line: { color: blue, width: 7 }, name: "Exercise boundary",
+        hovertemplate: "Boundary $%{x:.2f}<br>%{y:.1f} months in<extra>exercise below this</extra>" },
+    ],
+    { margin: { l: 0, r: 0, t: 0, b: 0 }, paper_bgcolor: "rgba(0,0,0,0)", font, showlegend: false,
+      scene: { xaxis: axis("Stock price ($)"), yaxis: axis("Months in"), zaxis: axis("Put value ($)"), camera: { eye: eye(-1.25, -1.2, 0.62), center: { x: 0, y: 0, z: -0.12 } }, aspectmode: "manual", aspectratio: { x: 1.2, y: 1, z: 0.7 } } },
+    cfg,
+  );
+
+  const hsurf = hs.surface;
+  const mx = [], my = [], mz = [], txt = [];
+  for (const sm of hs.smiles) sm.moneyness.forEach((m, i) => { mx.push(m); my.push(sm.days); mz.push(sm.market[i]); txt.push(`Strike $${sm.strike[i]}`); });
+  Plotly.react(
+    "hsSurface",
+    [
+      { type: "surface", x: hsurf.moneyness, y: hsurf.days, z: hsurf.iv, colorscale: surfaceScale, opacity: 0.85, showscale: false, name: "Heston",
+        hovertemplate: "Heston<br>%{x:.2f} × forward<br>%{y:.0f} days<br>Implied vol %{z:.1f}%<extra></extra>" },
+      { type: "scatter3d", mode: "markers", x: mx, y: my, z: mz, text: txt, marker: { size: 2.6, color: orange, line: { width: 0 } }, name: "Market",
+        hovertemplate: "Market · %{text}<br>%{x:.2f} × forward<br>%{y} days<br>Implied vol %{z:.1f}%<extra></extra>" },
+    ],
+    { margin: { l: 0, r: 0, t: 0, b: 0 }, paper_bgcolor: "rgba(0,0,0,0)", font, showlegend: false,
+      scene: { xaxis: axis("Strike ÷ forward"), yaxis: axis("Days to expiry"), zaxis: axis("Implied vol (%)"), camera: { eye: eye(1.2, -1.3, 0.55), center: { x: 0, y: 0, z: -0.12 } }, aspectmode: "manual", aspectratio: { x: 1.2, y: 1.2, z: 0.7 } } },
+    cfg,
+  );
+}
+
 async function main() {
   const get = (n) => fetch(`data/${n}.json`).then((r) => r.json());
   const [ff, rg, ls, hs] = await Promise.all(["famafrench", "regimes", "lsm", "heston"].map(get));
   const render = () => {
     famaFrench(ff);
+    ladderChart(ff);
     regimes(rg);
+    bicChart(rg);
     lsmChapter(ls);
+    fanChart(ls);
     hestonChapter(hs);
   };
   render();
+  surfaces(ls, hs);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => surfaces(ls, hs));
   let last = innerWidth;
   let timer;
   addEventListener("resize", () => {

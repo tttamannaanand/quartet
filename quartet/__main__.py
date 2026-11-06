@@ -33,12 +33,16 @@ def save(name: str, obj: dict) -> None:
 
 def run_famafrench() -> dict:
     factors = data.french_factors()
-    rows = [ff.analyse(t, data.prices(t), factors) | {"about": about} for t, about in ff.FUNDS.items()]
+    six = data.french_five_mom()
+    rows = [ff.analyse(t, data.prices(t), factors, six) | {"about": about} for t, about in ff.FUNDS.items()]
     print(f"\nChapter 1: Fama-French ({factors.index[0].date()} to {factors.index[-1].date()})")
     print(f"  {'fund':6} {'CAPM alpha':>11} {'FF3 alpha':>10} {'t':>6} {'mkt':>5} {'SMB':>6} {'HML':>6} {'R2':>5}")
     for r in rows:
         a, b = r["capm"], r["ff3"]
         print(f"  {r['ticker']:6} {a['alpha']:>10.1%} {b['alpha']:>10.1%} {b['t']:>6.2f} {b['mkt']:>5.2f} {b['smb']:>6.2f} {b['hml']:>6.2f} {b['r2']:>5.2f}")
+    print("  alpha as factors are added (CAPM -> FF3 -> FF5 -> FF5 + momentum):")
+    for r in rows:
+        print(f"  {r['ticker']:6} " + "  ".join(f"{x['alpha']:>6.1%} (t {x['t']:5.2f})" for x in r["ladder"]))
     out = {"factors_end": factors.index[-1].date().isoformat(), "funds": rows}
     save("famafrench", out)
     return out
@@ -59,6 +63,10 @@ def run_regimes() -> dict:
           f"calm lasts ~{full.expected_duration[0]:.0f} days, stress ~{full.expected_duration[1]:.0f} days")
     for b in tests:
         print(f"  {b.name:38} CAGR {b.cagr:6.1%}  vol {b.vol:5.1%}  return/vol {b.sharpe:5.2f}  max DD {b.max_drawdown:6.1%}  switches {b.switches}")
+    bics = rg.bic(r.to_numpy())
+    print("  BIC by number of states (lower is better):")
+    for o in bics:
+        print(f"    {o['states']} states: BIC {o['bic']:9.0f}  (+{o['delta']:5.0f})  vols {', '.join(f'{v:.0%}' for v in o['vols'])}")
     weekly = pd.DataFrame({"price": px.loc[honest.index], "honest": honest, "cheat": cheat}).resample("W-FRI").last().dropna()
     eq = pd.DataFrame({b.name: b.equity for b in tests}).resample("W-FRI").last().dropna()
     out = {
@@ -68,6 +76,7 @@ def run_regimes() -> dict:
                      "calm_mean": full.mu[0] * 252, "stress_mean": full.mu[1] * 252,
                      "calm_days": full.expected_duration[0], "stress_days": full.expected_duration[1]},
         "yearly_fits": history,
+        "bic": bics,
         "series": {"dates": [d.date().isoformat() for d in weekly.index], "price": weekly["price"].round(2).tolist(),
                    "honest": weekly["honest"].round(3).tolist(), "cheat": weekly["cheat"].round(3).tolist()},
         "equity": {"dates": [d.date().isoformat() for d in eq.index], **{k: eq[k].round(4).tolist() for k in eq}},
@@ -93,6 +102,9 @@ def run_lsm() -> dict:
         print(f"  {r['S']:>3} {r['sigma']:>4} {r['T']:>2} {r['lsm']:>7.3f} {r['se']:>7.3f} {r['tree']:>7.3f} {r['european']:>9.3f} {r['premium']:>9.3f}")
     print(f"  largest gap between LSM and the tree: {worst:.3f}")
     b = lsm.lsm_american_put(36, 40, 0.06, 0.2, 1, steps=100, n=200_000, seed=7)
+    times, sgrid, V, crit = lsm.binomial_surface(36, 40, 0.06, 0.2, 1, n=600, s_grid=np.linspace(24, 56, 33), t_points=26)
+    ex_frac = float((b.stop[b.stop >= 0] < 100).mean()) if (b.stop >= 0).any() else 0.0
+    print(f"  of the sampled in-the-money paths, {ex_frac:.0%} exercise before expiry")
     degree = []
     for d in (1, 2, 3, 4, 5, 6):
         res = lsm.lsm_american_put(36, 40, 0.06, 0.2, 1, n=100_000, degree=d, seed=7)
@@ -102,7 +114,10 @@ def run_lsm() -> dict:
         vals = [lsm.lsm_american_put(36, 40, 0.06, 0.2, 1, n=n, seed=s).price for s in range(8)]
         paths.append({"paths": n, "mean": float(np.mean(vals)), "spread": float(np.std(vals))})
     out = {"rows": rows, "worst_error": worst, "boundary": {"t": b.boundary_t, "s": b.boundary_s, "S": 36, "K": 40, "sigma": 0.2, "T": 1},
-           "degree": degree, "paths": paths, "tree_ref": lsm.binomial_american_put(36, 40, 0.06, 0.2, 1)}
+           "degree": degree, "paths": paths,
+           "fan": {"t": np.linspace(0, 1, b.paths.shape[1]).round(4).tolist(), "paths": b.paths.round(3).tolist(), "stop": b.stop.tolist(), "steps": 100},
+           "surface": {"t": times.round(4).tolist(), "s": sgrid.round(3).tolist(), "v": V.round(4).tolist(), "boundary": crit.round(4).tolist()},
+           "tree_ref": lsm.binomial_american_put(36, 40, 0.06, 0.2, 1)}
     save("lsm", out)
     return out
 
@@ -136,6 +151,16 @@ def run_heston() -> dict:
         print(f"  same profile using one {round(single[0].T*365)}-day expiry only")
         for q in prof1:
             print(f"    kappa {q['fixed']:5.1f} -> RMSE {q['rmse']:.2f}  xi {q['xi']:.2f}  theta {q['theta']:.4f}")
+    # Model implied-vol surface on a regular grid, between the shortest and longest expiries.
+    Ts = np.linspace(min(s.T for s in slices), max(s.T for s in slices), 24)
+    ms = np.linspace(0.8, 1.15, 29)
+    grid = []
+    for T in Ts:
+        df = np.exp(-snap["rate"] * T)
+        Fg = 1.0
+        prices = h.call_prices(Fg, ms, T, df, best.params)
+        row = [h.implied_vol(pv if m >= 1 else pv - df * (Fg - m), Fg, m, T, df, m >= 1) for pv, m in zip(prices, ms, strict=True)]
+        grid.append([round(v * 100, 3) if np.isfinite(v) else None for v in row])
     smiles = []
     for s in slices:
         model = h.model_prices(s, best.params)
@@ -146,7 +171,8 @@ def run_heston() -> dict:
     out = {"asof": snap["asof"], "spot": snap["spot"], "rate": snap["rate"], "quotes": n,
            "best": h.as_dict(best.params) | {"rmse": best.rmse_vol_pts},
            "fits": [h.as_dict(f.params) | {"rmse": f.rmse_vol_pts} for f in fits],
-           "near_best": len(near), "smiles": smiles, "profile": prof, "profile_single": prof1,
+           "near_best": len(near), "smiles": smiles,
+           "surface": {"days": (Ts * 365).round(1).tolist(), "moneyness": ms.round(4).tolist(), "iv": grid}, "profile": prof, "profile_single": prof1,
            "single_days": round(single[0].T * 365) if single else None}
     save("heston", out)
     return out

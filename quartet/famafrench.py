@@ -65,7 +65,26 @@ def regress(df: pd.DataFrame, factors: list[str]) -> Fit:
     return ols_newey_west(df["excess"].to_numpy(), X, ["alpha", *factors])
 
 
-def analyse(ticker: str, fund: pd.Series, factors: pd.DataFrame) -> dict:
+MODELS = {
+    "CAPM": ["Mkt-RF"],
+    "FF3": ["Mkt-RF", "SMB", "HML"],
+    "FF5": ["Mkt-RF", "SMB", "HML", "RMW", "CMA"],
+    "FF5 + momentum": ["Mkt-RF", "SMB", "HML", "RMW", "CMA", "Mom"],
+}
+
+
+def ladder(fund: pd.Series, factors6: pd.DataFrame) -> list[dict]:
+    """Alpha as factors are added one model at a time, all on the same dates."""
+    df = align(fund, factors6)
+    out = []
+    for name, cols in MODELS.items():
+        fit = regress(df, cols)
+        a, t = fit.get("alpha")
+        out.append({"model": name, "alpha": a * TRADING_DAYS, "t": t, "r2": fit.r2, "loadings": {c: fit.get(c)[0] for c in cols}})
+    return out
+
+
+def analyse(ticker: str, fund: pd.Series, factors: pd.DataFrame, factors6: pd.DataFrame | None = None) -> dict:
     df = align(fund, factors)
     capm = regress(df, ["Mkt-RF"])
     ff3 = regress(df, ["Mkt-RF", "SMB", "HML"])
@@ -89,6 +108,7 @@ def analyse(ticker: str, fund: pd.Series, factors: pd.DataFrame) -> dict:
         },
         # Share of the CAPM alpha that the two extra factors explain away.
         "explained": None if abs(a1) < 1e-12 else 1 - a3 / a1,
+        "ladder": ladder(fund, factors6) if factors6 is not None else [],
     }
 
 

@@ -20,7 +20,7 @@ pip install numpy scipy pandas yfinance
 python -m quartet fetch      # download prices, factors and today's option chain into data/
 python -m quartet all        # run the four chapters and write web/data/*.json
 python -m http.server -d web 8000
-pytest                       # 19 tests
+pytest                       # 24 tests
 ```
 
 Raw market data isn't committed. The results in `web/data/` are from **3 November 2026**; rerun `fetch` to update them.
@@ -38,7 +38,20 @@ Daily returns regressed on market, size (SMB) and value (HML), with Newey-West s
 | ARKK | −1.3% | +2.6% | 0.52 | 1.39 | 1.14 | −0.84 | 0.75 |
 | VTV (large value) | −0.6% | −0.5% | −0.62 | 0.90 | −0.10 | 0.35 | 0.95 |
 
+**Adding more factors** (all on the five-factor file, Newey-West t in brackets):
+
+| Fund | CAPM | FF3 | FF5 (+ profitability, investment) | FF5 + momentum |
+|---|---|---|---|---|
+| SPY | −0.2% (−0.43) | −0.1% (−0.25) | −0.6% (−1.84) | −0.5% (−1.62) |
+| BRK-B | +3.4% (1.03) | +2.7% (0.89) | +2.9% (0.95) | +3.0% (0.98) |
+| IWN | +0.6% (0.29) | −1.0% (−1.51) | −1.7% (−2.59) | −1.6% (−2.51) |
+| QQQ | +1.8% (0.77) | +3.0% (1.61) | **+6.1% (3.57)** | **+6.1% (3.57)** |
+| ARKK | −1.3% (−0.19) | +2.5% (0.50) | +5.2% (1.16) | +6.0% (1.36) |
+| VTV | −0.6% (−0.49) | −0.4% (−0.55) | −0.9% (−1.16) | −0.7% (−0.97) |
+
 **What broke:** no fund has an alpha with a t-statistic above 2, so none can be told apart from luck. IWN's small CAPM alpha disappears once its size and value tilts are counted. Factors can also *raise* alpha: growth funds (QQQ, ARKK) lean away from value, so their three-factor alpha is higher than their CAPM alpha. SPY is the sanity check: beta 0.98, alpha about equal to its fee. As the brief warned, most of the work was cleaning and aligning data.
+
+Adding profitability, investment and momentum **doesn't always shrink alpha**: QQQ's grows to +6.1% a year with a t of 3.57, because the Nasdaq-100 loads negatively on profitability (−0.41) and investment (−0.43), so the model expected it to do worse. IWN's turns significantly *negative*. With six models on six funds, one or two "significant" results can appear by chance, so they're leads, not proof.
 
 ## 2 · Regime switching: calm or stressed?
 
@@ -54,6 +67,17 @@ The strategy holds SPY when P(stressed) < 50% and cash otherwise, acting the nex
 
 **What broke:** the cheating version looks brilliant only because smoothed probabilities use returns from after each day. A test proves the filtered probabilities never change when future data is added, and the smoothed ones do. Done honestly, the signal halves volatility and the worst drop but gives up about 3% a year, and it whipsaws: 238 switches against 76.
 
+**How many states?** BIC (lower is better) for 1–4 states on the full sample:
+
+| States | BIC behind the best | Volatility of each state |
+|---|---|---|
+| 1 | +3,367 | 19% |
+| 2 | +683 | 11%, 30% |
+| 3 | +95 | 9%, 19%, 47% |
+| 4 | best | 8%, 15%, 24%, 61% |
+
+BIC keeps wanting more states: daily returns have fat tails, so each extra volatility level pays for its parameters. Two states is a choice for interpretability, and a test checks that BIC does pick 2 when the data really has 2.
+
 ## 3 · Longstaff-Schwartz: when to exercise early
 
 100,000 antithetic paths, 50 steps a year, weighted Laguerre polynomials of degree 3, on the 20 cases from Table 1 of the original paper (strike $40, 6% rates). Each is checked against a 2,000-step binomial tree.
@@ -61,7 +85,7 @@ The strategy holds SPY when P(stressed) < 50% and cash otherwise, acting the nex
 - **Largest gap from the tree: $0.020** across all 20 cases.
 - The method lands slightly below the tree in most cases. That's expected: a regression-based exercise rule is never perfect, and any imperfect rule earns less than the best one, so the estimate is biased low.
 - Early exercise is worth up to **$1.09** over the European price (stock $36, 20% volatility, 2 years).
-- The interactive page plots the exercise boundary, and how the price settles as paths go from 1,000 to 100,000.
+- The interactive page shows 80 simulated paths and the point where each one exercises, the exact boundary from the tree, how the price settles as paths go from 1,000 to 100,000, and a **rotatable 3D surface** of the put's value at every stock price and time, with the exercise boundary drawn across it.
 
 ## 4 · Heston: random volatility, calibrated to SPY
 
@@ -77,6 +101,8 @@ Calibrated to **497 out-of-the-money SPY quotes across 6 expiries** (24 days to 
 
 Average fit error: **0.59 volatility points**.
 
+The page draws the full **3D implied-volatility surface**: every market quote as a dot, with the fitted Heston surface through them. Drag to rotate.
+
 **What broke:**
 - All 24 starts found the same minimum, but it sits in a long, flat valley. **Lock kappa anywhere from 8 to 15 and refit the rest, and the error barely moves (0.59–0.61)**, as long as xi moves with it (1.9 to 2.5). The data pins down the combination, not each number.
 - With one 27-day expiry alone it's much worse: every kappa from 1 to 15 fits about equally, and theta runs into its upper limit.
@@ -85,10 +111,10 @@ Average fit error: **0.59 volatility points**.
 
 ## Tests
 
-19 tests check each piece against something independent:
+24 tests check each piece against something independent:
 - regression recovers known loadings, and a fund that only owns value loses its alpha;
-- the HMM recovers simulated states, EM never lowers the likelihood, and filtered probabilities never see the future;
-- Longstaff-Schwartz matches the binomial tree, and the tree matches the paper's 4.478;
+- the HMM recovers simulated states, EM never lowers the likelihood, filtered probabilities never see the future, and BIC picks the true number of states;
+- Longstaff-Schwartz matches the binomial tree (prices and the exercise boundary), paths only exercise in the money, and the tree matches the paper's 4.478;
 - Heston's characteristic function is a martingale, collapses to Black-Scholes when vol-of-vol is tiny, matches Monte Carlo, obeys put-call parity, and calibration refits a synthetic Heston chain.
 
 ## Caveats
@@ -106,8 +132,8 @@ quartet/regimes.py      chapter 2
 quartet/lsm.py          chapter 3
 quartet/heston.py       chapter 4
 quartet/__main__.py     runs everything and writes web/data
-web/                    the interactive page (vanilla JS + SVG)
-tests/                  19 tests
+web/                    the interactive page (vanilla JS + SVG; Plotly for the two 3D surfaces)
+tests/                  24 tests
 ```
 
 ## Licence

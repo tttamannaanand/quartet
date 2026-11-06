@@ -67,6 +67,8 @@ class LSMResult:
     european: float
     boundary_t: list[float]
     boundary_s: list[float]
+    paths: np.ndarray | None = None  # a small sample of paths, for plotting
+    stop: np.ndarray | None = None  # step at which each sampled path exercises (-1 = never)
 
 
 def lsm_american_put(
@@ -86,6 +88,7 @@ def lsm_american_put(
     disc = exp(-r * dt)
     cash = np.maximum(K - paths[:, -1], 0.0)
     european = float(exp(-r * T) * cash.mean())
+    stop = np.where(cash > 0, steps, -1)
     bt, bs = [], []
     grid = np.linspace(0.3 * K, K, 400)
     for t in range(steps - 1, 0, -1):
@@ -100,6 +103,7 @@ def lsm_american_put(
         ex = now > hold
         idx = np.flatnonzero(itm)[ex]
         cash[idx] = now[ex]
+        stop[idx] = t
         # Exercise boundary: the highest price at which exercising beats the fitted hold value.
         fitted = _basis(grid / K, degree) @ coef
         lo, hi = s[itm].min(), s[itm].max()
@@ -109,7 +113,38 @@ def lsm_american_put(
             bt.append(t * dt)
             bs.append(float(grid[better].max()))
     pv = cash * disc
-    return LSMResult(float(pv.mean()), float(pv.std() / sqrt(n)), european, bt[::-1], bs[::-1])
+    keep = np.r_[0:40, n // 2 : n // 2 + 40]  # 40 paths and their antithetic twins
+    return LSMResult(float(pv.mean()), float(pv.std() / sqrt(n)), european, bt[::-1], bs[::-1], paths[keep], stop[keep])
+
+
+def binomial_surface(S: float, K: float, r: float, sigma: float, T: float, q: float = 0.0, n: int = 1000, s_grid=None, t_points: int = 41):
+    """American put value V(S, t) on a regular grid, and the exact exercise boundary, from the tree.
+
+    The tree is run once per time slice, starting from each grid price, so every value is
+    a proper American price with the remaining time to expiry.
+    """
+    s_grid = np.linspace(0.5 * K, 1.5 * K, 41) if s_grid is None else np.asarray(s_grid)
+    times = np.linspace(0, T, t_points)
+    V = np.empty((len(times), len(s_grid)))
+    boundary = []
+    for i, t in enumerate(times):
+        left = T - t
+        if left <= 1e-9:
+            V[i] = np.maximum(K - s_grid, 0)
+            boundary.append(K)
+            continue
+        steps = max(50, int(n * left / T))
+        V[i] = [binomial_american_put(s, K, r, sigma, left, q, steps) for s in s_grid]
+        # Critical price: the highest S where exercising now is optimal, by bisection on the tree.
+        lo, hi = 0.3 * K, K
+        for _ in range(30):
+            mid = 0.5 * (lo + hi)
+            if binomial_american_put(mid, K, r, sigma, left, q, steps) - (K - mid) < 1e-6:
+                lo = mid
+            else:
+                hi = mid
+        boundary.append(lo)
+    return times, s_grid, V, np.array(boundary)
 
 
 # The test grid from Longstaff and Schwartz (2001), Table 1: K = 40, r = 6%, no dividends.

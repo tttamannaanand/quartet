@@ -18,7 +18,10 @@ import numpy as np
 import pandas as pd
 
 CACHE = Path(__file__).resolve().parent.parent / "data"
-FRENCH_DAILY = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_daily_CSV.zip"
+FRENCH = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/"
+FRENCH_DAILY = FRENCH + "F-F_Research_Data_Factors_daily_CSV.zip"
+FRENCH_5 = FRENCH + "F-F_Research_Data_5_Factors_2x3_daily_CSV.zip"
+FRENCH_MOM = FRENCH + "F-F_Momentum_Factor_daily_CSV.zip"
 
 
 def _path(name: str) -> Path:
@@ -49,7 +52,7 @@ def parse_french(text: str) -> pd.DataFrame:
     for line in text.splitlines():
         parts = [x.strip() for x in line.split(",")]
         if cols is None:
-            if len(parts) > 1 and parts[0] == "" and "Mkt-RF" in parts:
+            if len(parts) > 1 and parts[0] == "" and all(parts[1:]):
                 cols = parts[1:]
             continue
         if len(parts[0]) == 8 and parts[0].isdigit():
@@ -59,17 +62,28 @@ def parse_french(text: str) -> pd.DataFrame:
     return df / 100.0  # the file is in percent
 
 
-def french_factors(refresh: bool = False) -> pd.DataFrame:
-    """Daily Mkt-RF, SMB, HML and RF as decimals."""
-    p = _path("ff3-daily.csv")
+def _french(url: str, name: str, refresh: bool) -> pd.DataFrame:
+    p = _path(name)
     if p.exists() and not refresh:
         return pd.read_csv(p, index_col=0, parse_dates=True)
-    with urlopen(FRENCH_DAILY, timeout=60) as r:
+    with urlopen(url, timeout=60) as r:
         z = zipfile.ZipFile(io.BytesIO(r.read()))
-    text = z.read(z.namelist()[0]).decode("latin-1")
-    df = parse_french(text)
+    df = parse_french(z.read(z.namelist()[0]).decode("latin-1"))
     df.to_csv(p)
     return df
+
+
+def french_factors(refresh: bool = False) -> pd.DataFrame:
+    """Daily Mkt-RF, SMB, HML and RF as decimals."""
+    return _french(FRENCH_DAILY, "ff3-daily.csv", refresh)
+
+
+def french_five_mom(refresh: bool = False) -> pd.DataFrame:
+    """Daily five factors (Mkt-RF, SMB, HML, RMW, CMA, RF) joined with momentum (Mom)."""
+    five = _french(FRENCH_5, "ff5-daily.csv", refresh)
+    mom = _french(FRENCH_MOM, "mom-daily.csv", refresh)
+    mom.columns = ["Mom"]
+    return five.join(mom, how="inner")
 
 
 def option_chain(ticker: str = "SPY", refresh: bool = False) -> dict:

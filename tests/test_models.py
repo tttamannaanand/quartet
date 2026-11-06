@@ -157,3 +157,42 @@ def test_calibration_fits_a_synthetic_chain():
         slices.append(h.Slice(str(T), T, F, df, K, call, mid, iv, h.black_vega(F, K, T, df, iv)))
     best = h.calibrate(slices, starts=4, seed=1)[0]
     assert best.rmse_vol_pts < 0.05
+
+
+# ---------- additions ----------
+
+
+def test_parser_reads_a_single_factor_file():
+    text = "Momentum notes\n\n,Mom   \n19270103,   0.56\n19270104,  -0.12\n\nCopyright\n"
+    df = parse_french(text)
+    assert list(df.columns) == ["Mom"]
+    assert df.iloc[0, 0] == pytest.approx(0.0056)
+
+
+def test_bic_prefers_the_true_number_of_states():
+    x, _ = rg.simulate(TRUE, 6000, seed=8)
+    out = {o["states"]: o["bic"] for o in rg.bic(x, ks=(1, 2, 3))}
+    assert out[2] < out[1]
+    assert out[2] < out[3]
+
+
+def test_tree_boundary_sits_below_strike_and_rises_to_it():
+    times, s, V, b = lsm.binomial_surface(36, 40, 0.06, 0.2, 1, n=300, t_points=6)
+    assert all(x <= 40 + 1e-9 for x in b)
+    assert b[-1] == pytest.approx(40)
+    assert all(np.diff(b) > -0.05)  # rises toward expiry
+    assert np.all(V >= np.maximum(40 - s, 0) - 1e-9)  # never worth less than exercising now
+
+
+def test_lsm_boundary_agrees_with_the_tree():
+    r = lsm.lsm_american_put(36, 40, 0.06, 0.2, 1, n=100_000, seed=3)
+    times, _, _, b = lsm.binomial_surface(36, 40, 0.06, 0.2, 1, n=300, t_points=11)
+    mid = np.interp(0.5, r.boundary_t, r.boundary_s)
+    assert mid == pytest.approx(np.interp(0.5, times, b), abs=1.0)
+
+
+def test_sampled_paths_exercise_only_in_the_money():
+    r = lsm.lsm_american_put(36, 40, 0.06, 0.2, 1, n=20_000, seed=2)
+    for p, stop in zip(r.paths, r.stop, strict=True):
+        if stop >= 0:
+            assert p[stop] < 40

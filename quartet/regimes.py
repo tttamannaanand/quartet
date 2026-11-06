@@ -71,14 +71,34 @@ def smooth(x: np.ndarray, m: HMM) -> tuple[np.ndarray, np.ndarray, float]:
     return gamma, xi, ll
 
 
-def initial(x: np.ndarray) -> HMM:
+def initial(x: np.ndarray, k: int = 2) -> HMM:
     s = x.std()
-    return HMM(
-        pi0=np.array([0.5, 0.5]),
-        A=np.array([[0.98, 0.02], [0.04, 0.96]]),
-        mu=np.array([x.mean(), x.mean()]),
-        sd=np.array([0.6 * s, 1.8 * s]),
-    )
+    if k == 2:
+        sd = np.array([0.6 * s, 1.8 * s])
+    else:
+        sd = s * np.geomspace(0.5, 2.5, k)
+    stay = 0.97
+    A = np.full((k, k), (1 - stay) / max(k - 1, 1))
+    np.fill_diagonal(A, stay if k > 1 else 1.0)
+    return HMM(pi0=np.full(k, 1 / k), A=A, mu=np.full(k, x.mean()), sd=sd)
+
+
+def n_params(k: int) -> int:
+    """Free parameters: start probabilities, transitions, and a mean and volatility per state."""
+    return (k - 1) + k * (k - 1) + 2 * k
+
+
+def bic(x: np.ndarray, ks=(1, 2, 3, 4)) -> list[dict]:
+    """Bayesian information criterion for each number of states. Lower is better."""
+    out = []
+    for k in ks:
+        m, ll = fit(x, start=initial(x, k), iters=300)
+        out.append({"states": k, "loglik": ll, "params": n_params(k), "bic": -2 * ll + n_params(k) * np.log(len(x)),
+                    "vols": (m.sd * np.sqrt(252)).tolist(), "days": m.expected_duration.tolist() if k > 1 else [float(len(x))]})
+    best = min(o["bic"] for o in out)
+    for o in out:
+        o["delta"] = o["bic"] - best
+    return out
 
 
 def fit(x: np.ndarray, start: HMM | None = None, iters: int = 200, tol: float = 1e-7) -> tuple[HMM, float]:
