@@ -20,7 +20,7 @@ pip install numpy scipy pandas yfinance
 python -m quartet fetch      # download prices, factors and today's option chain into data/
 python -m quartet all        # run the four chapters and write web/data/*.json
 python -m http.server -d web 8000
-pytest                       # 24 tests
+pytest                       # 28 tests
 ```
 
 Raw market data isn't committed. The results in `web/data/` are from **3 November 2026**; rerun `fetch` to update them.
