@@ -196,3 +196,50 @@ def test_sampled_paths_exercise_only_in_the_money():
     for p, stop in zip(r.paths, r.stop, strict=True):
         if stop >= 0:
             assert p[stop] < 40
+
+
+# ---------- Heston edge cases ----------
+
+
+def test_implied_vol_is_nan_at_or_below_intrinsic_value():
+    # A deep in-the-money call quoted below intrinsic has no implied vol; it must not crash.
+    intrinsic = 0.99 * (100.0 - 80.0)
+    assert np.isnan(h.implied_vol(intrinsic - 0.5, 100.0, 80.0, 0.5, 0.99, True))
+    assert np.isnan(h.implied_vol(intrinsic, 100.0, 80.0, 0.5, 0.99, True))
+
+
+def test_feller_condition_flag():
+    assert h.Params(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7).feller  # 0.16 > 0.09
+    assert not h.Params(v0=0.04, kappa=1.0, theta=0.04, xi=0.6, rho=-0.7).feller  # 0.08 < 0.36
+
+
+def _synthetic_snapshot(spot=100.0, rate=0.03, days=90, sigma=0.2, bad_strike=None):
+    T, df = days / 365.0, float(np.exp(-rate * days / 365.0))
+    F = spot / df
+    strikes = np.arange(80.0, 121.0, 2.5)
+    calls = h.black(F, strikes, T, df, sigma, True)
+    puts = h.black(F, strikes, T, df, sigma, False)
+
+    def quotes(px):
+        bid, ask = px * 0.99, px * 1.01
+        if bad_strike is not None:
+            bid = np.where(strikes == bad_strike, 0.0, bid)
+        return {"strike": list(strikes), "bid": list(bid), "ask": list(ask)}
+
+    expiry = {"expiry": "2027-01-01", "days": days, "calls": quotes(calls), "puts": quotes(puts)}
+    return {"spot": spot, "rate": rate, "expiries": [expiry]}
+
+
+def test_clean_chain_recovers_flat_vol_and_forward():
+    (s,) = h.clean_chain(_synthetic_snapshot())
+    assert s.iv == pytest.approx(0.2, abs=0.01)
+    assert s.F == pytest.approx(100.0 / s.df, rel=1e-3)
+    # out-of-the-money only: puts below the forward, calls at or above it
+    assert np.all(s.is_call == (s.strikes >= s.F))
+
+
+def test_clean_chain_drops_quotes_without_a_bid_and_short_expiries():
+    full = h.clean_chain(_synthetic_snapshot())[0]
+    dropped = h.clean_chain(_synthetic_snapshot(bad_strike=92.5))[0]
+    assert 92.5 in full.strikes and 92.5 not in dropped.strikes
+    assert h.clean_chain(_synthetic_snapshot(days=5)) == []
